@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mentoring Platform</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="navbar">
+        <h1>Mentoring Session</h1>
+    </div>
+
+    <div id="chat-container">
+        <div id="video-grid"></div> <!-- Video Call Section -->
+        <div id="messages"></div> <!-- Chat Messages Section -->
+        <div id="message-box">
+            <input type="text" id="message" placeholder="Enter Message"/>
+            <input type="file" id="file-upload"/>
+            <button id="sendBtn">Send</button>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.3.1/dist/peerjs.min.js"></script>
+    <script>
+        // Use secure WebSocket for live server
+        const socket = io('wss://your-live-server.com'); // Ensure you're using wss for secure WebSocket connection
+        const sendBtn = document.getElementById('sendBtn');
+        const messageInput = document.getElementById('message');
+        const fileUpload = document.getElementById('file-upload');
+        const allMessages = document.getElementById('messages');
+        const videoGrid = document.getElementById('video-grid');
+
+        // Generate a unique room ID for each session
+        const roomId = "your-room-id"; // Replace with dynamic room ID generation if needed
+        const myPeer = new Peer(undefined, {
+            host: 'your-peerjs-server.com',  // Replace with your live PeerJS server
+            port: 443,  // Ensure you use a secure port
+            secure: true  // Use HTTPS for PeerJS connection
+        });
+
+        const myVideo = document.createElement('video');
+        myVideo.muted = true;
+
+        // Request media permissions for camera and microphone
+        navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true
+        }).then(stream => {
+            addVideoStream(myVideo, stream);
+
+            // Listen for incoming calls
+            myPeer.on('call', call => {
+                call.answer(stream);
+                const video = document.createElement('video');
+                call.on('stream', userVideoStream => {
+                    addVideoStream(video, userVideoStream);
+                });
+            });
+
+            // Notify server when a user connects
+            socket.on('user-connected', userId => {
+                connectToNewUser(userId, stream);
+            });
+        }).catch(err => {
+            console.error('Error accessing media devices:', err);
+            alert('Please allow camera and microphone access.');
+        });
+
+        // PeerJS open event, emit join-room event to Socket.IO
+        myPeer.on('open', id => {
+            socket.emit('join-room', roomId, id);
+        });
+
+        // Function to connect to new users
+        function connectToNewUser(userId, stream) {
+            const call = myPeer.call(userId, stream);
+            const video = document.createElement('video');
+            call.on('stream', userVideoStream => {
+                addVideoStream(video, userVideoStream);
+            });
+        }
+
+        // Function to add video stream to the video grid
+        function addVideoStream(video, stream) {
+            video.srcObject = stream;
+            video.addEventListener('loadedmetadata', () => {
+                video.play();
+            });
+            videoGrid.append(video);
+        }
+
+        // Chat and file sharing setup
+        socket.on("message", (message) => {
+            const p = document.createElement("p");
+            p.innerText = message;
+            p.classList.add('received');
+            allMessages.appendChild(p);
+            allMessages.scrollTop = allMessages.scrollHeight;
+        });
+
+        socket.on("file-share", (file) => {
+            const p = document.createElement("p");
+            const link = document.createElement("a");
+            link.href = file.url;
+            link.innerText = file.name;
+            link.download = file.name;
+            p.appendChild(link);
+            p.classList.add('received');
+            allMessages.appendChild(p);
+            allMessages.scrollTop = allMessages.scrollHeight;
+        });
+
+        sendBtn.addEventListener("click", () => {
+            const message = messageInput.value;
+            if (message.trim() !== "") {
+                socket.emit("user-message", message);
+                const p = document.createElement("p");
+                p.innerText = message;
+                p.classList.add('sent');
+                allMessages.appendChild(p);
+                messageInput.value = '';
+                allMessages.scrollTop = allMessages.scrollHeight;
+            }
+        });
+
+        fileUpload.addEventListener("change", () => {
+            const file = fileUpload.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const fileData = {
+                        name: file.name,
+                        url: reader.result
+                    };
+                    socket.emit("file-upload", fileData);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Handle disconnection
+        socket.on('user-disconnected', userId => {
+            console.log(`${userId} disconnected`);
+            // Implement user disconnect handling if needed
+        });
+    </script>
+</body>
+</html>
